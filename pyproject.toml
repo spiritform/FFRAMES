@@ -1,5 +1,5 @@
 [project]
-name = "comfy-frame-picker"
+name = "ffrances"
 description = "Hybrid frame extractor + trimmer for ComfyUI: scrub a video or IMAGE batch with in/out handles."
 version = "0.1.0"
 license = { text = "MIT" }
@@ -10,9 +10,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/spiritform/comfy-frame-picker"
+Repository = "https://github.com/spiritform/FFRAMES"
 
 [tool.comfy]
 PublisherId = "spiritform"
-DisplayName = "Frame Picker"
+DisplayName = "FFRAMES"
 Icon = ""

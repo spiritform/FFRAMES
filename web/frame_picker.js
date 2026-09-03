@@ -322,8 +322,18 @@ const CSS = `
   background: var(--accent);
   border-radius: 2px;
   top: -5px; bottom: -5px;
+  pointer-events: auto;
+  cursor: ew-resize;
 }
-.fp-card.single-mode .fp-play:hover { background: #ffd966; }
+/* generous hit area for easy grabbing */
+.fp-card.single-mode .fp-play::before {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -12px; bottom: -12px; left: -10px; right: -10px;
+}
+.fp-card.single-mode .fp-play:hover,
+.fp-card.single-mode .fp-play.dragging { background: #ffd966; }
 `;
 
 function injectStyles() {
@@ -878,6 +888,7 @@ app.registerExtension({
       function onUp() {
         if (dragging === "in")  $hIn.classList.remove("dragging");
         if (dragging === "out") $hOut.classList.remove("dragging");
+        $play.classList.remove("dragging");
         dragging = null;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
@@ -895,6 +906,12 @@ app.registerExtension({
       }
       $hIn.addEventListener("pointerdown",  e => beginDrag("in",  e));
       $hOut.addEventListener("pointerdown", e => beginDrag("out", e));
+      // single-mode: playhead pill is directly draggable
+      $play.addEventListener("pointerdown", e => {
+        if (isRange()) return;
+        $play.classList.add("dragging");
+        beginDrag("scrub", e);
+      });
       // strip click = scrub playhead directly to click position (handles are
       // z-index above, so their pointerdown wins when clicking on the handle)
       $strip.addEventListener("pointerdown", e => {
@@ -929,10 +946,15 @@ app.registerExtension({
       const origCfgMedia = node.onConfigure;
       node.onConfigure = function () {
         origCfgMedia?.apply(this, arguments);
-        setTimeout(() => {
+        // Copy-paste + workflow-load path: Comfy just restored node.size from
+        // serialization, but that height was computed for the source node's
+        // state (mode / width / aspect). Force a refit so height matches THIS
+        // node's actual UI. Load media after — its aspect change refits again.
+        requestAnimationFrame(() => {
+          node._fpRefit?.();
           const mw = findWidget(node, "media");
           if (mw && mw.value) loadMedia(mw.value);
-        }, 0);
+        });
       };
 
       // ---- Simple sizing: node is a container, UI scales inside it. ----
@@ -947,7 +969,7 @@ app.registerExtension({
       // widget.computeSize overrides — only the getHeight option is honored.
       // Preview height = current node width / aspect; fixed rows measured
       // once and cached. getHeight returns their sum every time Comfy asks.
-      const FIXED_ROWS_FALLBACK = 144;
+      const FIXED_ROWS_FALLBACK = 160;
       let _fixedRowsH = FIXED_ROWS_FALLBACK;
       const getAspect = () =>
         state.w > 0 && state.h > 0 ? state.w / state.h : 16 / 9;
@@ -955,10 +977,18 @@ app.registerExtension({
       // Prefer a live measurement; fall back to a fixed offset for the very
       // first call before the card has laid out.
       const PREVIEW_WIDTH_OFFSET = 44;
+      const rowEls = [$head, $transport, $stripWrap, $readout];
+      const remeasureFixedRows = () => {
+        const total = rowEls.reduce((s, el) => s + el.offsetHeight, 0);
+        if (total > 0) _fixedRowsH = Math.ceil(total);
+      };
       const getWidgetHeight = () => {
-        // use offsetWidth — getBoundingClientRect() includes the canvas zoom
-        // transform, which inflates the height and leaves empty space below
-        // the readout when the graph is zoomed in.
+        // if the card is already in the DOM, its scrollHeight is the true
+        // content size — matches exactly what CSS layout produces.
+        if (root.isConnected && root.scrollHeight > 100) {
+          return root.scrollHeight;
+        }
+        // fallback formula for the very first call (element not yet mounted)
         let previewW = $preview?.offsetWidth || 0;
         if (previewW < 50) {
           const w = Math.max(node.size?.[0] || 380, MIN_W);
@@ -974,18 +1004,25 @@ app.registerExtension({
         getMinHeight: getWidgetHeight,
       });
 
+      let _lastRefitH = 0;
       const refit = () => {
+        remeasureFixedRows();
         const w = Math.max(node.size?.[0] || 380, MIN_W);
-        node.setSize([w, node.computeSize()[1]]);
+        const total = node.computeSize()[1];
+        if (Math.abs(total - _lastRefitH) < 2) return; // loop guard
+        _lastRefitH = total;
+        node.setSize([w, total]);
         node.setDirtyCanvas?.(true, true);
       };
 
-      // measure fixed-row heights once (fonts, padding etc. settled)
       requestAnimationFrame(() => {
-        const measured = [$head, $transport, $stripWrap, $readout]
-          .reduce((s, el) => s + el.offsetHeight, 0);
-        if (measured > 0) _fixedRowsH = Math.ceil(measured);
+        remeasureFixedRows();
         refit();
+        // keep it live: any row or preview resize triggers a refit so we
+        // never under-estimate (font load, aspect change, node width drag).
+        if (typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver(() => refit());
+        [...rowEls, $preview, root].forEach(el => ro.observe(el));
       });
 
       // expose refit so setPreviewAspect can re-run it after media loads

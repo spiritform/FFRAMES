@@ -1,30 +1,33 @@
-# comfy-frame-picker
+# FFRAMES
 
-Hybrid frame extractor + trimmer for ComfyUI. One node that:
+Hybrid video frame picker + trimmer for ComfyUI. One node that lets you scrub a video, pick a single frame or a range, and pipe the result into the rest of your graph.
 
-- accepts an **IMAGE batch** (e.g. from `VHS_LoadVideo`) or a **video/image file** you upload;
-- shows a scrubbable **filmstrip preview** with **in / out handles**;
-- outputs the selected frame range as an `IMAGE` batch (single frame if in == out).
+![FFRAMES screenshot](docs/screenshot.png)
+
+- Accepts an **IMAGE batch** (e.g. from `VHS_LoadVideo`) or a **video file** you upload.
+- Scrubbable **preview** with in / out handles.
+- **SINGLE** mode (one frame) or **RANGE** mode (batch).
+- Export the current frame as PNG, or drag the preview onto the canvas to spawn a `LoadImage` node.
 
 ## Install
 
-Clone into your `ComfyUI/custom_nodes/`:
-
 ```
 cd ComfyUI/custom_nodes
-git clone https://github.com/spiritform/comfy-frame-picker
+git clone https://github.com/spiritform/FFRAMES
 ```
 
 Requires `opencv-python`, `pillow`, `numpy` (already present in most Comfy installs).
 
 ## Use
 
-Add **Frame Picker** (category `image/animation`). Either:
+Add **FFRAMES** (category `image/animation`). Either:
 
-- upload a video / image via the `media` widget, then drag the in/out handles, **or**
-- connect a batch of images to `images` — the picker will slice by `frame_start` / `frame_end`.
+- Double-click the preview to upload a video, then drag the playhead / in-out handles, **or**
+- Connect a batch of images to `images` — the picker will slice by `frame_start` / `frame_end`.
 
 Outputs:
 
 - `images` — the selected slice as an `IMAGE` batch
-- `count` — number of frames in the slice
+- `frame_count` — number of frames in the slice
+- `fps` — source frame rate
+- `duration` — slice length in seconds
