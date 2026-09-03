@@ -232,17 +232,7 @@ const CSS = `
   transform: translateX(-1px);
   pointer-events: none;
 }
-.fp-play::before, .fp-play::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 8px; height: 5px;
-  background: #fff;
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-.fp-play::before { top: -5px; }
-.fp-play::after  { bottom: -5px; transform: translateX(-50%) rotate(180deg); }
+.fp-play::before, .fp-play::after { display: none; }
 
 /* handles: visible pill + generous invisible hit-area for easy dragging */
 .fp-h {
@@ -324,6 +314,16 @@ const CSS = `
 .fp-card.single-mode .fp-band,
 .fp-card.single-mode .fp-readout .col-in,
 .fp-card.single-mode .fp-readout .col-out { visibility: hidden; }
+
+/* single-frame mode: playhead becomes a yellow pill (matches the range handles) */
+.fp-card.single-mode .fp-play {
+  width: 8px;
+  transform: translateX(-4px);
+  background: var(--accent);
+  border-radius: 2px;
+  top: -5px; bottom: -5px;
+}
+.fp-card.single-mode .fp-play:hover { background: #ffd966; }
 `;
 
 function injectStyles() {
@@ -751,7 +751,7 @@ app.registerExtension({
 
       // ---- mode: range vs single ----
       const $modeBtn = root.querySelector(".fp-mode-btn");
-      function isRange() { return !!widgetValue(node, "range_mode", true); }
+      function isRange() { return !!widgetValue(node, "range_mode", false); }
       function applyMode() {
         const r = isRange();
         root.classList.toggle("single-mode", !r);
@@ -956,7 +956,10 @@ app.registerExtension({
       // first call before the card has laid out.
       const PREVIEW_WIDTH_OFFSET = 44;
       const getWidgetHeight = () => {
-        let previewW = $preview?.getBoundingClientRect?.().width || 0;
+        // use offsetWidth — getBoundingClientRect() includes the canvas zoom
+        // transform, which inflates the height and leaves empty space below
+        // the readout when the graph is zoomed in.
+        let previewW = $preview?.offsetWidth || 0;
         if (previewW < 50) {
           const w = Math.max(node.size?.[0] || 380, MIN_W);
           previewW = w - PREVIEW_WIDTH_OFFSET;
@@ -980,7 +983,7 @@ app.registerExtension({
       // measure fixed-row heights once (fonts, padding etc. settled)
       requestAnimationFrame(() => {
         const measured = [$head, $transport, $stripWrap, $readout]
-          .reduce((s, el) => s + el.getBoundingClientRect().height, 0);
+          .reduce((s, el) => s + el.offsetHeight, 0);
         if (measured > 0) _fixedRowsH = Math.ceil(measured);
         refit();
       });

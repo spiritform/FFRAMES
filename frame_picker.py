@@ -175,7 +175,7 @@ class FFRAMES:
             "required": {
                 "frame_start": ("INT", {"default": 0, "min": 0, "max": 999999, "step": 1}),
                 "frame_end":   ("INT", {"default": 0, "min": 0, "max": 999999, "step": 1}),
-                "range_mode":  ("BOOLEAN", {"default": True, "label_on": "range", "label_off": "single"}),
+                "range_mode":  ("BOOLEAN", {"default": False, "label_on": "range", "label_off": "single"}),
             },
             "optional": {
                 "images": ("IMAGE",),
