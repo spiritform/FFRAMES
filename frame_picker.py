@@ -163,7 +163,7 @@ async def _probe_route(request: web.Request):
 
 # ------------- Node -------------
 
-class FramePicker:
+class FFRAMES:
     @classmethod
     def INPUT_TYPES(cls):
         input_dir = folder_paths.get_input_directory()
@@ -223,5 +223,5 @@ class FramePicker:
         return f"{p}|{st.st_size}|{int(st.st_mtime)}|{frame_start}:{frame_end}:{range_mode}"
 
 
-NODE_CLASS_MAPPINGS = {"FramePicker": FramePicker}
-NODE_DISPLAY_NAME_MAPPINGS = {"FramePicker": "Frame Picker"}
+NODE_CLASS_MAPPINGS = {"FFRAMES": FFRAMES}
+NODE_DISPLAY_NAME_MAPPINGS = {"FFRAMES": "FFRAMES"}

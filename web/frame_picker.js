@@ -19,27 +19,28 @@ const CSS = `
   overflow: hidden;
   box-sizing: border-box;
   width: 100%;
-  height: 100%;
+  /* uniform horizontal inset — every row aligns to the preview's edges */
+  padding: 0 12px;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-/* preview stretches into ALL remaining node space */
-.fp-preview   { flex: 1 1 auto; min-height: 100px; }
+/* preview shape is driven by --fp-aspect (default 16:9, updated to match
+   loaded media). The card auto-fits — no letterbox bars, no wasted space. */
+.fp-preview   { flex: 0 0 auto; }
 .fp-head      { flex: 0 0 auto; }
 .fp-transport { flex: 0 0 auto; }
 .fp-strip-wrap{ flex: 0 0 auto; }
 .fp-readout   { flex: 0 0 auto; }
 
-/* ---------- preview area: fills all remaining space; inner frame aspect-locks ---------- */
+/* ---------- preview area: aspect-ratio driven ---------- */
 .fp-preview {
   position: relative;
   width: 100%;
+  aspect-ratio: var(--fp-aspect, 16 / 9);
   background: #2a2a32;
   border-bottom: 1px solid var(--line);
   overflow: hidden;
-  flex: 1 1 auto;
-  min-height: 60px;
   display: grid;
   place-items: center;
   transition: background 0.15s;
@@ -85,11 +86,10 @@ const CSS = `
 .fp-preview:hover .fp-clear { opacity: 0.9; }
 .fp-clear:hover { opacity: 1 !important; background: rgba(0,0,0,0.75); }
 
-/* aspect-locked inner box: fits within preview, video fills it perfectly */
+/* media fills the preview — preview IS the aspect, so no letterbox */
 .fp-media-frame {
-  aspect-ratio: var(--fp-aspect, 16 / 9);
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   background: #000;
   display: none;
@@ -98,7 +98,7 @@ const CSS = `
 .fp-media-frame video, .fp-media-frame img {
   width: 100%;
   height: 100%;
-  object-fit: fill; /* frame IS the aspect, fill safe */
+  object-fit: fill; /* preview matches aspect, fill is safe */
   display: block;
   user-select: none;
   -webkit-user-drag: none;
@@ -107,7 +107,7 @@ const CSS = `
 /* ---------- meta header: dimensions / fps / frames, left-aligned ---------- */
 .fp-head {
   position: relative;
-  padding: 10px 14px 8px;
+  padding: 10px 0 8px;
   background: linear-gradient(180deg, #0f0f14 0%, #14141a 100%);
   border-bottom: 1px solid var(--line);
   display: flex;
@@ -153,7 +153,7 @@ const CSS = `
   align-items: center;
   justify-content: flex-start;
   gap: 4px;
-  padding: 8px 12px 4px;
+  padding: 8px 0 4px;
 }
 .fp-transport .fp-mode-btn { margin-right: 6px; }
 .fp-mode-btn {
@@ -198,7 +198,7 @@ const CSS = `
 /* ---------- timeline strip ---------- */
 .fp-strip-wrap {
   position: relative;
-  padding: 12px 12px 10px;
+  padding: 12px 0 10px;
   user-select: none;
 }
 .fp-strip {
@@ -292,7 +292,7 @@ const CSS = `
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   gap: 8px;
-  padding: 4px 12px 12px;
+  padding: 4px 0 12px;
   font-size: 10px;
   color: var(--muted);
   letter-spacing: 0.10em;
@@ -349,9 +349,9 @@ function setWidget(node, name, value) {
 }
 
 app.registerExtension({
-  name: "spiritform.FramePicker",
+  name: "spiritform.FFRAMES",
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData.name !== "FramePicker") return;
+    if (nodeData.name !== "FFRAMES") return;
 
     const orig = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
@@ -491,13 +491,15 @@ app.registerExtension({
       }
 
       function setPreviewAspect() {
-        const $mediaFrame = $preview.querySelector(".fp-media-frame");
-        if (!$mediaFrame) return;
+        // set the CSS var on the preview itself — the preview element is the
+        // aspect-locked box now; media frame just fills it edge-to-edge.
         if (state.w > 0 && state.h > 0) {
-          $mediaFrame.style.aspectRatio = `${state.w} / ${state.h}`;
+          $preview.style.setProperty("--fp-aspect", `${state.w} / ${state.h}`);
         } else {
-          $mediaFrame.style.removeProperty("aspect-ratio");
+          $preview.style.removeProperty("--fp-aspect");
         }
+        // aspect drives node height — snap node to fit
+        node._fpRefit?.();
       }
 
       function swapPreviewMedia(name) {
@@ -941,21 +943,58 @@ app.registerExtension({
       const MIN_W      = 320;
       const CARD_MIN_H = 260;
 
-      // Use the CANONICAL Comfy DOM widget API — getHeight in options is what
-      // Comfy's internal computeSize reads. Setting widget.computeSize after
-      // creation is ignored in newer frontends.
-      const DOM_HEIGHT = 400;
+      // Synchronous, width-driven sizing via getHeight. Newer Comfy ignores
+      // widget.computeSize overrides — only the getHeight option is honored.
+      // Preview height = current node width / aspect; fixed rows measured
+      // once and cached. getHeight returns their sum every time Comfy asks.
+      const FIXED_ROWS_FALLBACK = 144;
+      let _fixedRowsH = FIXED_ROWS_FALLBACK;
+      const getAspect = () =>
+        state.w > 0 && state.h > 0 ? state.w / state.h : 16 / 9;
+      // preview width < node width by (comfy widget margin + 2× card padding).
+      // Prefer a live measurement; fall back to a fixed offset for the very
+      // first call before the card has laid out.
+      const PREVIEW_WIDTH_OFFSET = 44;
+      const getWidgetHeight = () => {
+        let previewW = $preview?.getBoundingClientRect?.().width || 0;
+        if (previewW < 50) {
+          const w = Math.max(node.size?.[0] || 380, MIN_W);
+          previewW = w - PREVIEW_WIDTH_OFFSET;
+        }
+        return Math.ceil(previewW / getAspect() + _fixedRowsH);
+      };
+
       node.addDOMWidget("frame_picker_ui", "custom", root, {
         serialize: false,
         hideOnZoom: false,
-        getHeight: () => DOM_HEIGHT,
-        getMinHeight: () => DOM_HEIGHT,
+        getHeight: getWidgetHeight,
+        getMinHeight: getWidgetHeight,
       });
+
+      const refit = () => {
+        const w = Math.max(node.size?.[0] || 380, MIN_W);
+        node.setSize([w, node.computeSize()[1]]);
+        node.setDirtyCanvas?.(true, true);
+      };
+
+      // measure fixed-row heights once (fonts, padding etc. settled)
+      requestAnimationFrame(() => {
+        const measured = [$head, $transport, $stripWrap, $readout]
+          .reduce((s, el) => s + el.getBoundingClientRect().height, 0);
+        if (measured > 0) _fixedRowsH = Math.ceil(measured);
+        refit();
+      });
+
+      // expose refit so setPreviewAspect can re-run it after media loads
+      node._fpRefit = refit;
 
       const origResize = node.onResize;
       node.onResize = function (size) {
         origResize?.apply(this, arguments);
         if (size[0] < MIN_W) size[0] = MIN_W;
+        // height always tracks width × aspect + fixed rows; the user can't
+        // pull the node taller than the UI needs.
+        size[1] = node.computeSize()[1];
         node.setDirtyCanvas?.(true, true);
       };
 
