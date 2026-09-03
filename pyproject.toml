@@ -1,0 +1,18 @@
+[project]
+name = "comfy-frame-picker"
+description = "Hybrid frame extractor + trimmer for ComfyUI: scrub a video or IMAGE batch with in/out handles."
+version = "0.1.0"
+license = { text = "MIT" }
+dependencies = [
+    "opencv-python",
+    "pillow",
+    "numpy",
+]
+
+[project.urls]
+Repository = "https://github.com/spiritform/comfy-frame-picker"
+
+[tool.comfy]
+PublisherId = "spiritform"
+DisplayName = "Frame Picker"
+Icon = ""
