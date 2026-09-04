@@ -175,7 +175,7 @@ class FFRAMES:
             "required": {
                 "frame_start": ("INT", {"default": 0, "min": 0, "max": 999999, "step": 1}),
                 "frame_end":   ("INT", {"default": 0, "min": 0, "max": 999999, "step": 1}),
-                "range_mode":  ("BOOLEAN", {"default": False, "label_on": "range", "label_off": "single"}),
+                "range_mode":  ("BOOLEAN", {"default": True, "label_on": "range", "label_off": "single"}),
             },
             "optional": {
                 "images": ("IMAGE",),
@@ -183,8 +183,8 @@ class FFRAMES:
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "INT", "FLOAT", "FLOAT")
-    RETURN_NAMES = ("images", "frame_count", "fps", "duration")
+    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "INT", "FLOAT", "INT")
+    RETURN_NAMES = ("images", "first_frame", "last_frame", "frame_count", "fps", "duration")
     FUNCTION = "pick"
     CATEGORY = "image/animation"
 
@@ -195,13 +195,20 @@ class FFRAMES:
         if not range_mode:
             frame_end = frame_start
 
+        # IN can now sit past OUT — remember direction, decode ascending,
+        # then flip so first_frame == frame at frame_start, last_frame == frame_end
+        reversed_range = frame_start > frame_end
+        lo, hi = (frame_end, frame_start) if reversed_range else (frame_start, frame_end)
+
         # 1. connected batch wins (unknown fps — 0.0)
         if images is not None and images.shape[0] > 0:
             n = images.shape[0]
-            s = max(0, min(frame_start, n - 1))
-            e = max(s, min(frame_end, n - 1))
+            s = max(0, min(lo, n - 1))
+            e = max(s, min(hi, n - 1))
             out = images[s:e + 1]
-            return (out, int(out.shape[0]), 0.0, 0.0)
+            if reversed_range:
+                out = out.flip(0)
+            return (out, out[:1], out[-1:], int(out.shape[0]), 0.0, 0)
 
         # 2. widget-picked video
         path = _resolve_input_path(media)
@@ -209,10 +216,12 @@ class FFRAMES:
             raise RuntimeError("frame_picker: no input (connect IMAGE or pick a video)")
         if path.suffix.lower() not in VIDEO_EXTS:
             raise RuntimeError(f"frame_picker: unsupported extension {path.suffix}")
-        out, fps = _decode_video_range(path, frame_start, frame_end)
+        out, fps = _decode_video_range(path, lo, hi)
+        if reversed_range:
+            out = out.flip(0)
         count = int(out.shape[0])
-        duration = count / fps if fps > 0 else 0.0
-        return (out, count, float(fps), float(duration))
+        duration = int(round(count / fps)) if fps > 0 else 0
+        return (out, out[:1], out[-1:], count, float(fps), duration)
 
     @classmethod
     def IS_CHANGED(cls, frame_start, frame_end, range_mode=True, images=None, media=""):

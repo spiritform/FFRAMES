@@ -107,7 +107,7 @@ const CSS = `
 /* ---------- meta header: dimensions / fps / frames, left-aligned ---------- */
 .fp-head {
   position: relative;
-  padding: 10px 0 8px;
+  padding: 6px 0 6px 6px;
   background: linear-gradient(180deg, #0f0f14 0%, #14141a 100%);
   border-bottom: 1px solid var(--line);
   display: flex;
@@ -191,6 +191,13 @@ const CSS = `
 .fp-btn:active { transform: translateY(1px); }
 .fp-btn.icon { padding: 0; width: 26px; }
 .fp-btn.icon svg { width: 10px; height: 10px; fill: currentColor; }
+.fp-btn.fp-io-btn { font-size: 11px; font-weight: 700; letter-spacing: 0; }
+.fp-btn.fp-io-btn.active {
+  color: var(--accent);
+  border-color: rgba(245,197,66,0.35);
+  background: rgba(245,197,66,0.14);
+}
+.fp-btn.fp-io-btn.active:hover { background: rgba(245,197,66,0.22); }
 .fp-btn.pri { color: var(--text); background: rgba(245,197,66,0.14); border-color: rgba(245,197,66,0.30); }
 .fp-btn.pri:hover { background: rgba(245,197,66,0.22); }
 .fp-spacer { flex: 1; }
@@ -218,9 +225,9 @@ const CSS = `
 .fp-band {
   position: absolute;
   top: 0; bottom: 0;
-  background: rgba(245,197,66,0.20);
-  border-left: 1px solid var(--accent);
-  border-right: 1px solid var(--accent);
+  background: rgba(255,255,255,0.10);
+  border-left: 1px solid rgba(255,255,255,0.30);
+  border-right: 1px solid rgba(255,255,255,0.30);
   pointer-events: none;
 }
 /* playhead */
@@ -239,26 +246,20 @@ const CSS = `
   position: absolute;
   top: -5px; bottom: -5px;
   width: 8px;
-  background: var(--accent);
+  background: rgba(255,255,255,0.70);
   border-radius: 2px;
   cursor: ew-resize;
   transform: translateX(-4px);
   z-index: 3;
+  transition: background 0.12s;
 }
 .fp-h::before {
   content: "";
   position: absolute;
   top: -12px; bottom: -12px; left: -14px; right: -14px;
 }
-.fp-h::after {
-  content: "";
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 1px; height: 14px;
-  background: rgba(20,20,26,0.7);
-}
-.fp-h:hover, .fp-h.dragging { background: #ffd966; }
+.fp-h:hover { background: rgba(255,255,255,0.95); }
+.fp-h.dragging, .fp-h.selected { background: var(--accent); }
 
 /* playhead: also draggable — bigger cursor and hit area */
 .fp-play {
@@ -404,6 +405,8 @@ app.registerExtension({
           <button class="fp-btn icon" data-act="n1" title="Next frame (→ / Shift+→ = +10)">
             <svg viewBox="0 0 10 10"><path d="M3 1 L8 5 L3 9 Z"/></svg>
           </button>
+          <button class="fp-btn fp-io-btn" data-act="first" title="Preview first frame">FF</button>
+          <button class="fp-btn fp-io-btn" data-act="last" title="Preview last frame">LF</button>
           <button class="fp-btn icon" data-act="export" title="Export current frame as PNG">
             <svg viewBox="0 0 12 12"><path d="M6 1 L6 8 M3 5 L6 8 L9 5 M2 10 L10 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
@@ -438,6 +441,10 @@ app.registerExtension({
       const $hOut = document.createElement("div"); $hOut.className = "fp-h";
       $strip.append($band, $play, $hIn, $hOut);
 
+      const $btnFF = root.querySelector('[data-act="first"]');
+      const $btnLF = root.querySelector('[data-act="last"]');
+
+
       const state = { total: 0, fps: 0, w: 0, h: 0, playhead: 0 };
 
       const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -452,9 +459,18 @@ app.registerExtension({
 
         $hIn.style.left  = inPct + "%";
         $hOut.style.left = outPct + "%";
-        $band.style.left  = inPct + "%";
-        $band.style.width = Math.max(0, outPct - inPct) + "%";
+        // band spans min→max so it stays visible even if IN sits past OUT
+        $band.style.left  = Math.min(inPct, outPct) + "%";
+        $band.style.width = Math.abs(outPct - inPct) + "%";
         $play.style.left  = frameToPct(state.playhead) + "%";
+
+        // FF / LF button + matching handle light up when playhead is parked
+        // on the IN / OUT marker
+        const p = state.playhead | 0;
+        $btnFF?.classList.toggle("active", p === inF);
+        $btnLF?.classList.toggle("active", p === outF);
+        $hIn.classList.toggle("selected",  p === inF);
+        $hOut.classList.toggle("selected", p === outF);
 
         // display frames as 1-based so IN/OUT/FRAME line up with the total
         // count ("241 F") — internal widget values stay 0-based
@@ -554,7 +570,10 @@ app.registerExtension({
       }
 
       // ---- probe (metadata only) + swap preview ----
-      async function loadMedia(name) {
+      // resetRange=true on fresh media picks → snap IN/OUT to full range so
+      // both handles are visible at opposite ends. Workflow reloads pass
+      // false so serialized IN/OUT values are preserved.
+      async function loadMedia(name, resetRange = true) {
         swapPreviewMedia(name);
         if (!name) {
           state.total = 0; state.fps = 0; state.w = 0; state.h = 0;
@@ -572,10 +591,16 @@ app.registerExtension({
           state.h     = info.height | 0;
 
           const total = Math.max(1, state.total);
-          let curIn  = clamp(widgetValue(node, "frame_start", 0) | 0, 0, total - 1);
-          let curOut = widgetValue(node, "frame_end", 0) | 0;
-          if (!curOut) curOut = total - 1;
-          curOut = clamp(Math.max(curOut, curIn), curIn, total - 1);
+          let curIn, curOut;
+          if (resetRange) {
+            curIn  = 0;
+            curOut = total - 1;
+          } else {
+            // preserve serialized values (workflow reload); no order clamp —
+            // FF and LF are independent, may cross, may be equal
+            curIn  = clamp(widgetValue(node, "frame_start", 0) | 0, 0, total - 1);
+            curOut = clamp(widgetValue(node, "frame_end",   0) | 0, 0, total - 1);
+          }
           setWidget(node, "frame_start", curIn);
           setWidget(node, "frame_end",   curOut);
           setPlayhead(curIn);
@@ -704,7 +729,9 @@ app.registerExtension({
           if (!blob) return;
 
           const srcName = (findWidget(node, "media")?.value || "frame").replace(/\.[^.]+$/, "");
-          const filename = `${srcName}_f${(state.playhead | 0) + 1}_${Date.now()}.png`;
+          const n   = (state.playhead | 0) + 1;
+          const pad = Math.max(String(state.total || n).length, 3);
+          const filename = `${srcName}_f${String(n).padStart(pad, "0")}_${Date.now()}.png`;
           const fd = new FormData();
           fd.append("image", blob, filename);
           fd.append("overwrite", "true");
@@ -761,7 +788,7 @@ app.registerExtension({
 
       // ---- mode: range vs single ----
       const $modeBtn = root.querySelector(".fp-mode-btn");
-      function isRange() { return !!widgetValue(node, "range_mode", false); }
+      function isRange() { return !!widgetValue(node, "range_mode", true); }
       function applyMode() {
         const r = isRange();
         root.classList.toggle("single-mode", !r);
@@ -798,7 +825,9 @@ app.registerExtension({
           const a = document.createElement("a");
           a.href = URL.createObjectURL(blob);
           const src = (findWidget(node, "media")?.value || "frame").replace(/\.[^.]+$/, "");
-          a.download = `${src}_f${(state.playhead | 0) + 1}.png`;
+          const n   = (state.playhead | 0) + 1;
+          const pad = Math.max(String(state.total || n).length, 3);
+          a.download = `${src}_f${String(n).padStart(pad, "0")}.png`;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
@@ -834,8 +863,10 @@ app.registerExtension({
         btn.addEventListener("click", e => {
           e.stopPropagation();
           const act = btn.dataset.act;
+          if (act === "first")  setPlayhead(widgetValue(node, "frame_start", 0) | 0);
           if (act === "p1")     step(-1);
           if (act === "n1")     step(+1);
+          if (act === "last")   setPlayhead(widgetValue(node, "frame_end", 0) | 0);
           if (act === "play")   togglePlay();
           if (act === "mode")   toggleMode();
           if (act === "export") exportFrame();
@@ -868,19 +899,18 @@ app.registerExtension({
         return clamp(((e.clientX - r.left) / r.width) * 100, 0, 100);
       }
       let dragging = null;
+      let _captureTarget = null;
+      let _capturePointerId = null;
       function onMove(e) {
         if (!dragging) return;
         const f = pctToFrame(pctFromEvent(e));
         if (dragging === "in") {
-          const outF = widgetValue(node, "frame_end", 0) | 0;
-          const ni = Math.min(f, outF);
-          setWidget(node, "frame_start", ni);
-          setPlayhead(ni);
+          // FF handle can now sit past LF — the range gets flipped downstream
+          setWidget(node, "frame_start", f);
+          setPlayhead(f);
         } else if (dragging === "out") {
-          const inF = widgetValue(node, "frame_start", 0) | 0;
-          const no = Math.max(f, inF);
-          setWidget(node, "frame_end", no);
-          setPlayhead(no);
+          setWidget(node, "frame_end", f);
+          setPlayhead(f);
         } else {
           setPlayhead(f);
         }
@@ -889,9 +919,15 @@ app.registerExtension({
         if (dragging === "in")  $hIn.classList.remove("dragging");
         if (dragging === "out") $hOut.classList.remove("dragging");
         $play.classList.remove("dragging");
+        if (_captureTarget && _capturePointerId != null) {
+          try { _captureTarget.releasePointerCapture(_capturePointerId); } catch {}
+        }
+        _captureTarget = null;
+        _capturePointerId = null;
         dragging = null;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
       }
       function beginDrag(kind, e) {
         if (state.total <= 0 && kind === "scrub") return;
@@ -900,8 +936,14 @@ app.registerExtension({
         dragging = kind;
         if (kind === "in")  $hIn.classList.add("dragging");
         if (kind === "out") $hOut.classList.add("dragging");
+        // capture the pointer on the element so we get up/cancel even if the
+        // cursor leaves the window or another handler eats the event.
+        _captureTarget = kind === "in" ? $hIn : kind === "out" ? $hOut : $strip;
+        _capturePointerId = e.pointerId;
+        try { _captureTarget.setPointerCapture(e.pointerId); } catch {}
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onUp);
         onMove(e);
       }
       $hIn.addEventListener("pointerdown",  e => beginDrag("in",  e));
@@ -950,10 +992,11 @@ app.registerExtension({
         // serialization, but that height was computed for the source node's
         // state (mode / width / aspect). Force a refit so height matches THIS
         // node's actual UI. Load media after — its aspect change refits again.
+        // Pass resetRange=false so serialized IN/OUT survive the reload.
         requestAnimationFrame(() => {
           node._fpRefit?.();
           const mw = findWidget(node, "media");
-          if (mw && mw.value) loadMedia(mw.value);
+          if (mw && mw.value) loadMedia(mw.value, false);
         });
       };
 
