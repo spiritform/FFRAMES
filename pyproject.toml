@@ -1,8 +1,9 @@
 [project]
-name = "ffrances"
-description = "Hybrid frame extractor + trimmer for ComfyUI: scrub a video or IMAGE batch with in/out handles."
+name = "fframes"
 version = "0.1.0"
+description = "Video frame picker + trimmer for ComfyUI. Scrub, pick FF/LF, pipe into first-frame/last-frame video models."
 license = { text = "MIT" }
+requires-python = ">=3.9"
 dependencies = [
     "opencv-python",
     "pillow",
